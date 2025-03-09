@@ -3,31 +3,69 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Atur konfigurasi halaman (opsional, tapi berguna)
+# -------------------- KONFIGURASI DASHBOARD --------------------
 st.set_page_config(
     page_title="Dashboard Penyewaan Sepeda",
-    layout="wide"  # gunakan layout lebar
+    layout="wide"
 )
-
-# Atur style Seaborn
 sns.set_style('whitegrid')
 
-# -------------------- Fungsi Load Data --------------------
+# -------------------- FUNGSI LOAD DATA --------------------
 @st.cache_data
 def load_daily_data():
-    # File main_data.csv dihasilkan dari complete_df (day_df)
-    return pd.read_csv("dashboard/main_data.csv")
+    df = pd.read_csv("dashboard/main_data.csv")
+    # Konversi kolom tanggal menjadi datetime (sesuaikan nama kolom jika perlu)
+    df['dteday'] = pd.to_datetime(df['dteday'], errors='coerce')
+    return df
 
 @st.cache_data
 def load_hourly_data():
-    # File hour_data.csv untuk data penyewaan per jam (hour_df)
-    return pd.read_csv("dashboard/hour.csv")
+    df = pd.read_csv("dashboard/hour.csv")
+    # Jika file hourly juga memiliki kolom tanggal, konversi menjadi datetime
+    if 'dteday' in df.columns:
+        df['dteday'] = pd.to_datetime(df['dteday'], errors='coerce')
+    return df
 
-# -------------------- Load Data --------------------
-day_df = load_daily_data()
-hour_df = load_hourly_data()
+# -------------------- LOAD DATA --------------------
+day_df_original = load_daily_data()
+hour_df_original = load_hourly_data()
 
-# -------------------- Buat Kolom Kategori Suhu (Jika Belum Ada) --------------------
+# -------------------- SIDEBAR FILTER: RENTANG TANGGAL --------------------
+st.sidebar.header("Filter Global")
+
+# Ambil min dan max date dari data harian; ubah ke date agar kompatibel dengan date_input
+min_date = day_df_original['dteday'].min().date()
+max_date = day_df_original['dteday'].max().date()
+
+# Pilih rentang tanggal (pastikan memilih dua tanggal)
+date_range = st.sidebar.date_input("Pilih Rentang Tanggal", value=[min_date, max_date])
+
+if len(date_range) == 2:
+    start_date, end_date = date_range
+    if start_date > end_date:
+        st.sidebar.error("Tanggal Mulai tidak boleh melebihi Tanggal Akhir.")
+    # Filter data harian berdasarkan rentang tanggal yang dipilih
+    day_df = day_df_original[
+        (day_df_original['dteday'] >= pd.to_datetime(start_date)) &
+        (day_df_original['dteday'] <= pd.to_datetime(end_date))
+    ].copy()
+    # Filter data hourly jika kolom 'dteday' ada
+    if 'dteday' in hour_df_original.columns:
+        hour_df = hour_df_original[
+            (hour_df_original['dteday'] >= pd.to_datetime(start_date)) &
+            (hour_df_original['dteday'] <= pd.to_datetime(end_date))
+        ].copy()
+    else:
+        hour_df = hour_df_original.copy()
+else:
+    day_df = day_df_original.copy()
+    hour_df = hour_df_original.copy()
+
+# Debug: Tampilkan rentang tanggal yang dipilih dan jumlah data setelah filter
+st.sidebar.markdown(f"**Data Tanggal:** {start_date} s/d {end_date}")
+st.sidebar.markdown(f"**Jumlah data harian setelah filter:** {day_df.shape[0]} baris")
+
+# -------------------- BUAT KOLOM KATEGORI SUHU (JIKA BELUM ADA) --------------------
 def temp_cluster(temp):
     if temp < 0.3:
         return 'Dingin'
@@ -40,7 +78,7 @@ if 'temp_cat' not in day_df.columns:
     day_df['temp_cat'] = day_df['temp'].apply(temp_cluster)
     day_df['temp_cat'] = day_df['temp_cat'].astype('category')
 
-# -------------------- Agregasi DataFrame --------------------
+# -------------------- AGREGASI DATAFRAME (BERDASARKAN DATA YANG SUDAH TERFILTER) --------------------
 # 1) Penyewaan Per Jam
 hourly_df = hour_df.groupby('hr').agg({
     "cnt": ["max", "min", "mean", "std"]
@@ -72,7 +110,6 @@ season_df = day_df.groupby('season').agg({
 })
 season_df.columns = ["unique_instant", "max_cnt", "min_cnt", "mean_cnt", "std_cnt"]
 season_df = season_df.round(2)
-# Rata-rata untuk visualisasi
 season_avg = day_df.groupby('season')['cnt'].mean().round(2)
 
 # 5) Penyewaan Berdasarkan Kategori Suhu
@@ -102,7 +139,12 @@ holiday_df.columns = ["unique_instant", "max_cnt", "min_cnt", "mean_cnt", "std_c
 holiday_df = holiday_df.round(2)
 holiday_avg = day_df.groupby('holiday')['cnt'].mean().round(2)
 
-# -------------------- Fungsi Plot --------------------
+# -------------------- Data Rata-Rata untuk Visualisasi --------------------
+monthly_avg = day_df.groupby('mnth')['cnt'].mean().round(2)
+daily_avg = day_df.groupby('weekday')['cnt'].mean().reindex(day_order).round(2)
+hourly_avg = hour_df.groupby('hr')['cnt'].mean().sort_index().round(2)
+
+# -------------------- FUNGSI PLOT --------------------
 def bar_plot(data, title, x_label, y_label):
     fig, ax = plt.subplots(figsize=(14, 7))
     sns.barplot(x=data.index, y=data.values, ax=ax)
@@ -117,16 +159,10 @@ def line_plot(data, title, x_label, y_label):
     ax.set_title(title, fontsize=20)
     ax.set_xlabel(x_label, fontsize=14)
     ax.set_ylabel(y_label, fontsize=14)
-    # Pastikan label jam 0-23 muncul
     ax.set_xticks(range(0, 24))
     return fig
 
-# -------------------- Data Rata-Rata untuk Visualisasi --------------------
-monthly_avg = day_df.groupby('mnth')['cnt'].mean().round(2)
-daily_avg = day_df.groupby('weekday')['cnt'].mean().reindex(day_order).round(2)
-hourly_avg = hour_df.groupby('hr')['cnt'].mean().sort_index().round(2)
-
-# -------------------- Layout Dashboard --------------------
+# -------------------- LAYOUT DASHBOARD --------------------
 st.title("Dashboard Analisis Data Penyewaan Sepeda")
 
 # Radio button untuk menentukan apakah akan menampilkan tabel dataframe
