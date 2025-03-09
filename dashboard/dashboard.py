@@ -14,14 +14,12 @@ sns.set_style('whitegrid')
 @st.cache_data
 def load_daily_data():
     df = pd.read_csv("dashboard/main_data.csv")
-    # Konversi kolom tanggal menjadi datetime (sesuaikan nama kolom jika perlu)
     df['dteday'] = pd.to_datetime(df['dteday'], errors='coerce')
     return df
 
 @st.cache_data
 def load_hourly_data():
     df = pd.read_csv("dashboard/hour.csv")
-    # Jika file hourly juga memiliki kolom tanggal, konversi menjadi datetime
     if 'dteday' in df.columns:
         df['dteday'] = pd.to_datetime(df['dteday'], errors='coerce')
     return df
